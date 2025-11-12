@@ -1,10 +1,9 @@
+
 # Dokumentacija izmena Jam.py framework-a za PostgreSQL Boolean podršku
 
 ## Pregled
 
 Ovaj dokument opisuje izmene u tri glavna fajla Jam.py framework-a (`sql.py`, `server_classes.py`, `dataset.py`) koje rešavaju problem kompatibilnosti sa PostgreSQL bazom podataka u vezi sa boolean tipom podataka.
-
----
 
 ## Problem koji se rešava
 
@@ -25,15 +24,9 @@ HINT:  You will need to rewrite or cast the expression.
 2. **False kao marker:** Aplikacijski kod koristi Python `False` kao placeholder za praznu vrednost
 3. **Nekonzistentna boolean konverzija:** Različiti tipovi vrednosti (int, float, string) nisu bili konzistentno konvertovani u boolean za PostgreSQL
 
----
+### 1. Izmene u `/jam/sql.py`
 
-## 1. Izmene u `/jam/sql.py`
-
-### 1.1 Dodavanje @staticmethod dekoratora za `_to_bool()` metodu
-
-**Linije:** 16-34
-
-**Kod:**
+#### 1.1 Dodavanje @staticmethod dekoratora za `_to_bool()` metodu
 
 ```python
 @staticmethod
@@ -63,13 +56,7 @@ def _to_bool(value):
 - Može se koristiti kao pomoćna funkcija izvan instance konteksta (npr. u `server_classes.py`)
 - Normalizuje različite tipove vrednosti (int, float, string, bool) u Python boolean
 
----
-
-### 1.2 Patch u `insert_sql()` metodi
-
-**Linije:** 77-102
-
-**Kod:**
+#### 1.2 Patch u `insert_sql()` metodi
 
 ```python
 ############################################################################
@@ -95,35 +82,24 @@ if field.data_type == consts.BOOLEAN:
         value = (field.data, field.data_type)
 
 ############################################################################
-
-if field.field_name == self._deleted_flag:
-    value = (0, field.data_type)
 ```
 
 **Ključne tačke:**
 
-1. **Per-field inicijalizacija:** `value` se inicijalizuje za svako polje posebno
-2. **False → None konverzija:** Ako je `field.data` Python `False` ALI tip polja NIJE `consts.BOOLEAN`, konvertuje se u `None` (SQL NULL)
-3. **PostgreSQL boolean normalizacija:** Za boolean polja na PostgreSQL-u koristi `_to_bool()` za ispravnu vrednost
-4. **deleted_flag override:** `deleted_flag` polje MORA biti `0` (INTEGER), ne `None` i ne `False`
+- **Per-field inicijalizacija:** `value` se inicijalizuje za svako polje posebno
+- **False → None konverzija:** Ako je `field.data` Python `False` ALI tip polja NIJE `consts.BOOLEAN`, konvertuje se u `None` (SQL NULL)
+- **PostgreSQL boolean normalizacija:** Za boolean polja na PostgreSQL-u koristi `_to_bool()` za ispravnu vrednost
+- **deleted_flag override:** `deleted_flag` polje MORA biti `0` (INTEGER), ne `None` i ne `False`
 
----
-
-### 1.3 Identičan patch u `update_sql()` metodi
-
-**Linije:** 120-146
+#### 1.3 Identičan patch u `update_sql()` metodi
 
 **Implementacija:** Identična struktura kao u `insert_sql()` — osigurava konzistentnost između INSERT i UPDATE operacija.
 
----
+### 2. Izmene u `/jam/server_classes.py`
 
-## 2. Izmene u `/jam/server_classes.py`
-
-### 2.1 Boolean konverzija u `copy_database()` metodi
+#### 2.1 Boolean konverzija u `copy_database()` metodi
 
 **Lokacija:** Unutar `copy_rows()` funkcije (linija ~955)
-
-**Kod:**
 
 ```python
 elif field.data_type == consts.BOOLEAN:
@@ -144,15 +120,9 @@ elif field.data_type == consts.BOOLEAN:
 
 **Kontekst:** Ova funkcija se poziva kada administrator kopira podatke iz jedne baze u drugu (različiti DB tipovi).
 
----
+### 3. Izmene u `/jam/dataset.py`
 
-## 3. Izmene u `/jam/dataset.py`
-
-### 3.1 Smart boolean konverzija u `set_value()` metodi
-
-**Linije:** 267-280
-
-**Kod:**
+#### 3.1 Smart boolean konverzija u `set_value()` metodi
 
 ```python
 if self.data_type == consts.BOOLEAN:
@@ -181,11 +151,9 @@ if self.data_type == consts.BOOLEAN:
 
 **Kontekst:** Ova metoda se poziva svaki put kada se postavlja vrednost boolean polja kroz aplikacijski kod.
 
----
+### Tehnički detalji rešenja
 
-## Tehnički detalji rešenja
-
-### Problem 1: Value Reuse Bug
+#### Problem 1: Value Reuse Bug
 
 **Pre izmena:**
 
@@ -212,8 +180,6 @@ if field.data_type == consts.BOOLEAN:
 row.append(value)  # ✓ Svako polje ima svoju vrednost
 ```
 
----
-
 ### Problem 2: False kao marker za praznu vrednost
 
 **Situacija:** Aplikacijski kod često postavlja `False` kao marker za prazno polje:
@@ -229,8 +195,6 @@ if _val is False and field.data_type != consts.BOOLEAN:
     _val = None  # SQL NULL
 ```
 
----
-
 ### Problem 3: PostgreSQL strict typing
 
 **PostgreSQL očekivanja:**
@@ -244,8 +208,6 @@ if _val is False and field.data_type != consts.BOOLEAN:
 - Boolean polja na PostgreSQL dobijaju Python `True`/`False`
 - Boolean polja na drugim bazama dobijaju `1`/`0`
 - Ne-boolean polja nikada ne dobijaju `False`, već `None` (NULL)
-
----
 
 ## Testiranje
 
@@ -291,13 +253,12 @@ item.apply()
 
 ```python
 task.copy_database('POSTGRESQL', database='target_db', ...)
-
-# Očekivano:
-# - Boolean vrednosti iz MySQL (0/1) konvertovane u PostgreSQL (false/true)
-# - Bez type mismatch grešaka
 ```
 
----
+Očekivano:
+
+- Boolean vrednosti iz MySQL (0/1) konvertovane u PostgreSQL (false/true)
+- Bez type mismatch grešaka
 
 ## Kompatibilnost
 
@@ -309,8 +270,6 @@ task.copy_database('POSTGRESQL', database='target_db', ...)
 | **MSSQL** | ✅ Kompatibilno | Koristi integer (0/1) za boolean |
 | **Firebird** | ⚠️ Potrebno testiranje | Teorijski kompatibilno |
 | **Oracle** | ⚠️ Potrebno testiranje | Teorijski kompatibilno |
-
----
 
 ## Preporuke za dalji rad
 
@@ -346,8 +305,6 @@ item.field_integer.data = None
 - Proveriti sve INSERT/UPDATE/DELETE operacije
 - Validirati copy_database funkcionalnost
 
----
-
 ## Zaključak
 
 Ove izmene rešavaju kritičan bug koji je sprečavao korišćenje Jam.py sa PostgreSQL bazom podataka. Rešenje je:
@@ -358,7 +315,6 @@ Ove izmene rešavaju kritičan bug koji je sprečavao korišćenje Jam.py sa Pos
 ✅ **Safe fallback** - try-except blokovi sprečavaju runtime greške  
 
 ---
-
 **Autor:** Radosav  
 **Datum:** 12. novembar 2025.  
 **Verzija:** 1.0
